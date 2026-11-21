@@ -13,6 +13,8 @@ Solana program(s) + TypeScript client, built with Anchor. Workspace for workshop
 
 ## Commands
 
+**This machine has no rustup:** `source scripts/env.sh` (or just run `bash scripts/check.sh` / `bash scripts/demo.sh`). `anchor build` fails here; `build_sbf` from env.sh uses `cargo-build-sbf --no-rustup-override` with platform-tools rustc. Solana CLI default cluster is mainnet — always pass `-u localhost`.
+
 ```bash
 NO_DNA=1 anchor build                 # build all programs + IDL (NO_DNA=1 disables TUI/prompts)
 NO_DNA=1 anchor test                  # LiteSVM/Surfpool tests (Surfpool is the default anchor test runner)

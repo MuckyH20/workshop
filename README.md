@@ -1,3 +1,23 @@
+# 💓 Heartbeat — dead-man's-switch SOL vault
+
+Alice locks SOL in a PDA vault and names Bob as heir. Every deposit, withdraw or `ping` resets a countdown.
+If Alice goes silent past the deadline, Bob can `claim` the whole vault (it closes to him). A late ping still revives it.
+
+```bash
+bash scripts/demo.sh    # narrated offline demo (LiteSVM + clock warp), ~1s after first build
+bash scripts/check.sh   # fmt → SBF build → clippy -D warnings → 11 LiteSVM tests
+```
+
+| ix | who | effect | CU |
+|---|---|---|---|
+| `initialize(beneficiary, interval_secs)` | owner | create vault PDA `["vault", owner]` | ~7.3k |
+| `deposit(amount)` | owner | SOL in + ping | ~6.1k |
+| `ping()` | owner | reset countdown | ~4.2k |
+| `withdraw(amount)` | owner | SOL out (keeps rent-exempt min) + ping | — |
+| `claim()` | beneficiary | after deadline: sweep + close | ~4.2k |
+
+---
+
 # workshop — Claude Code workspace for Solana (Anchor / Kit / Surfpool)
 
 Drop-in `.claude/` + `CLAUDE.md` + `.mcp.json` for an Anchor project. Designed around three ideas:
@@ -28,7 +48,6 @@ scripts/setup.sh                  toolchain check, hook chmod, installs solana-d
     guard-bash.sh                 PreToolUse Bash: denies secret dumps / keypair overwrite / piped installers; asks on mainnet or deploy
     format-on-edit.sh             PostToolUse: rustfmt / prettier / taplo
     post-build-check.sh           PostToolUse (anchor build): declare_id! == keypair == Anchor.toml, IDL vs client freshness
-    stop-check.sh                 Stop: nudges to build+test if programs/ changed without a build
   skills/
     new-instruction/              /new-instruction <program> <ix> — full scaffold incl. tests + client regen
     audit/                        /audit [--diff|program] — forks the security-auditor subagent
@@ -78,7 +97,6 @@ In the first session run `/context` (confirm CLAUDE.md + 4 rules loaded), `/mcp`
 - **`context: fork` + `agent: security-auditor` on `/audit`**: the audit runs in a clean context that hasn't seen the implementation reasoning — the work isn't grading itself.
 - **`CLAUDE_CODE_SUBAGENT_MODEL=sonnet`** default with `model: opus` pinned only on the auditor: cheap exploration, expensive judgment where it matters.
 - **Path-scoped rules** instead of one giant CLAUDE.md: the TS rules never consume context while you're in Rust, and vice-versa.
-- **`stop-check.sh`** uses `stop_hook_active` so it nudges at most once per turn and can't loop.
 
 ## Customize
 

@@ -6,12 +6,20 @@ export NO_DNA=1
 ROOT="${CLAUDE_PROJECT_DIR:-.}"
 cd "$ROOT" || exit 0
 
+# Hooks don't inherit interactive PATH additions; add the usual Solana/Anchor locations.
+export PATH="$HOME/.cargo/bin:$HOME/.avm/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
+
 v() { command -v "$1" >/dev/null 2>&1 && "$@" 2>/dev/null | head -n1 || echo "not installed"; }
 
 echo "== Solana workspace context =="
 echo "rust:     $(v rustc --version)"
 echo "solana:   $(v solana --version)"
-echo "anchor:   $(v anchor --version)"
+ANCHOR_V=$(anchor --version 2>/dev/null | head -n1)
+if [ -z "$ANCHOR_V" ]; then  # avm shim fails without rustup — fall back to the versioned binary
+  ab=$(ls -1 "$HOME"/.avm/bin/anchor-* 2>/dev/null | sort -V | tail -n1)
+  [ -n "$ab" ] && ANCHOR_V="$("$ab" --version 2>/dev/null) (use: $ab — avm shim broken)"
+fi
+echo "anchor:   ${ANCHOR_V:-not installed}"
 echo "surfpool: $(v surfpool --version)"
 echo "node:     $(v node --version)"
 
@@ -32,6 +40,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "git: $(git branch --show-current 2>/dev/null) @ $(git rev-parse --short HEAD 2>/dev/null) — $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
 fi
 
+command -v cargo-build-sbf >/dev/null 2>&1 || echo "mode: NATIVE-ONLY (no SBF toolchain) — use 'bash scripts/check.sh'; LiteSVM tests + anchor build are skipped"
 [ -d .claude/skills/solana-dev ] || echo "note: official solana-dev skill not installed — run scripts/setup.sh"
 echo "Deploys only via /deploy <cluster>. Keypairs and .env are off-limits."
 exit 0
