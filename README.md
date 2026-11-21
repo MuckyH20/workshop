@@ -3,18 +3,82 @@
 Alice locks SOL in a PDA vault and names Bob as heir. Every deposit, withdraw or `ping` resets a countdown.
 If Alice goes silent past the deadline, Bob can `claim` the whole vault (it closes to him). A late ping still revives it.
 
+## Verify in 30 seconds
+
 ```bash
-bash scripts/demo.sh    # narrated offline demo (LiteSVM + clock warp), ~1s after first build
 bash scripts/check.sh   # fmt → SBF build → clippy -D warnings → 11 LiteSVM tests
+bash scripts/demo.sh    # narrated offline demo (LiteSVM + clock warp), ~1s after first build
 ```
+
+Expected tail of `check.sh`:
+
+```
+test result: ok. 1 passed; 0 failed   # demo.rs
+test result: ok. 10 passed; 0 failed  # test_heartbeat.rs
+```
+
+No rustup on the box? `scripts/env.sh` builds with `cargo-build-sbf --no-rustup-override` and the platform-tools rustc.
+
+## Run it: web UI on localhost
+
+```bash
+source scripts/env.sh
+build_sbf                                                  # → target/deploy/heartbeat.so
+solana-test-validator --reset --ledger test-ledger \
+  --bpf-program 7ouoJM4gLY56rhSQxaySYmZWksmvsXeBm1wed9EjTKrQ target/deploy/heartbeat.so
+# new terminal
+pnpm install && pnpm app                                   # → http://127.0.0.1:5173
+```
+
+The page shows the vault with a live countdown ring, the three demo wallets (alice = owner, bob = heir,
+mallory = attacker), and buttons for every instruction. Switch "Acting as" to try the attacks: Mallory
+claiming, Bob claiming early, Alice over-withdrawing. Every transaction is **simulated first**, and rejections
+show the decoded Anchor error without being sent.
+
+Prefer a terminal? `node scripts/hb.mjs status | init bob 120 | deposit 1 | ping | withdraw 0.5 | claim --as bob`,
+or `pnpm demo:live` for the whole story end-to-end (waits ~65s for the deadline in real time).
+
+> Demo wallets are derived from public seeds (`heartbeat-demo:<name>`) so they're identical on every run and
+> nothing touches disk. Because anyone can derive them, `app/server.mjs` and `hb.mjs` refuse any non-localhost
+> RPC and the server binds to `127.0.0.1` only.
+
+## Instructions
 
 | ix | who | effect | CU |
 |---|---|---|---|
-| `initialize(beneficiary, interval_secs)` | owner | create vault PDA `["vault", owner]` | ~7.3k |
-| `deposit(amount)` | owner | SOL in + ping | ~6.1k |
-| `ping()` | owner | reset countdown | ~4.2k |
-| `withdraw(amount)` | owner | SOL out (keeps rent-exempt min) + ping | — |
+| `initialize(beneficiary, interval_secs)` | owner | create vault PDA `["vault", owner]` | 7,282 |
+| `deposit(amount)` | owner | SOL in + ping | 6,126 |
+| `ping()` | owner | reset countdown | 4,220 |
+| `withdraw(amount)` | owner | SOL out (keeps rent-exempt min) + ping | 4,824 |
 | `claim()` | beneficiary | after deadline: sweep + close | ~4.2k |
+
+CU measured by simulation on a local `solana-test-validator` (`claim` from the LiteSVM run).
+
+## Security model
+
+Every attack below has a negative test in `programs/heartbeat/tests/test_heartbeat.rs`.
+
+| Threat | Defense | Test |
+|---|---|---|
+| Stranger claims the vault | `has_one = beneficiary` + `Signer` on claim | `stranger_cannot_claim` |
+| Heir claims while owner is alive | `require!(now > last_ping + interval)` → `StillAlive` | `claim_before_deadline_fails` |
+| Someone pings / withdraws another owner's vault | PDA `seeds = ["vault", owner]` + `has_one = owner` + `Signer` | `stranger_cannot_ping_or_withdraw_someone_elses_vault` |
+| Re-initialize to hijack beneficiary | `init` (not `init_if_needed`) → account already in use | `cannot_initialize_twice` |
+| Withdraw drains the rent reserve, leaving a zombie account | `available = lamports − rent_min`, checked → `InsufficientFunds` | `withdraw_keeps_rent_exempt_minimum` |
+| Owner names self / zero address as heir | `beneficiary != owner && != default` → `InvalidBeneficiary` | `rejects_self_or_default_beneficiary` |
+| Interval of 0 (instantly claimable) or overflow | `60s ≤ interval ≤ 10y` → `InvalidInterval`; `checked_add` for the deadline | `rejects_bad_interval` |
+| Zero-amount no-op transactions | `amount > 0` → `ZeroAmount` | `rejects_zero_amounts` |
+| Owner returns after the deadline but before a claim | intended: ping still works and revives the vault | `late_ping_revives_vault` |
+
+Also: canonical bump stored at init and reused (`bump = vault.bump`); `claim` uses Anchor `close = beneficiary`
+(lamports and data both go, no revival); all math is `checked_*`; events emitted for every state transition.
+
+**Known limits / not yet done**
+- No heir-rotation instruction: the beneficiary is fixed at init. If the heir loses their key, only the owner can get
+  the funds out (by withdrawing); if both keys are gone, the SOL is stuck.
+- Clients hand-encode instruction data (discriminator + args). A Codama client (`clients/js/`) isn't generated yet.
+- Scripts send v0 transactions; the repo convention is v1 once the local validator path is confirmed.
+- Not audited.
 
 ---
 
